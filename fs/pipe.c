@@ -132,13 +132,13 @@ pipe_iov_copy_from_user(void *addr, int *offset, struct iovec *iov,
 						      iov->iov_base, copy))
 				return -EFAULT;
 		} else {
-		        if (copy_from_user(addr + *offset,
+			if (copy_from_user(addr + *offset,
 					   iov->iov_base, copy))
 				return -EFAULT;
 		}
 		*offset += copy;
 		*remaining -= copy;
-                iov->iov_base += copy;
+		iov->iov_base += copy;
 		iov->iov_len -= copy;
 	}
 	return 0;
@@ -166,7 +166,7 @@ pipe_iov_copy_to_user(struct iovec *iov, void *addr, int *offset,
 		}
 		*offset += copy;
 		*remaining -= copy;
-                iov->iov_base += copy;
+		iov->iov_base += copy;
 		iov->iov_len -= copy;
 	}
 	return 0;
@@ -413,11 +413,11 @@ pipe_read(struct kiocb *iocb, const struct iovec *_iov,
 			}
 
 			atomic = !iov_fault_in_pages_write(iov, chars);
-                        remaining = chars;
-                        offset = buf->offset;
+			remaining = chars;
+			offset = buf->offset;
 redo:
 			addr = ops->map(pipe, buf, atomic);
-			error = pipe_iov_copy_to_user(iov, addr, &offset,
+			error = pipe_iov_copy_to_user(iov, addr, &buf->offset,
 						      &remaining, atomic);
 			ops->unmap(pipe, buf, addr);
 			if (unlikely(error)) {
@@ -433,7 +433,6 @@ redo:
 				break;
 			}
 			ret += chars;
-                        buf->offset += chars;
 			buf->len -= chars;
 
 			/* Was it a packet buffer? Clean up and exit */
@@ -538,7 +537,7 @@ pipe_write(struct kiocb *iocb, const struct iovec *_iov,
 		if (ops->can_merge && offset + chars <= PAGE_SIZE) {
 			int error, atomic = 1;
 			void *addr;
-                        size_t remaining = chars;
+			size_t remaining = chars;
 			error = ops->confirm(pipe, buf);
 			if (error)
 				goto out;
@@ -603,7 +602,7 @@ redo1:
 				chars = total_len;
 
 			iov_fault_in_pages_read(iov, chars);
-                        remaining = chars;
+			remaining = chars;
 redo2:
 			if (atomic)
 				src = kmap_atomic(page);
@@ -612,7 +611,7 @@ redo2:
 
 			error = pipe_iov_copy_from_user(src, &offset, iov,
 							&remaining, atomic);
-                        if (atomic)
+			if (atomic)
 				kunmap_atomic(src);
 			else
 				kunmap(page);
