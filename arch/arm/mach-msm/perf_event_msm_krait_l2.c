@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011,2012,2014 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011,2012,2014,2016 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -432,7 +432,6 @@ static int msm_l2_test_set_ev_constraint(struct perf_event *event)
 	int err = 0;
 	u64 bitmap_t;
 	u32 shift_idx;
-
 	if (evt_prefix == L2_TRACECTR_PREFIX)
 		return err;
 	/*
@@ -446,9 +445,8 @@ static int msm_l2_test_set_ev_constraint(struct perf_event *event)
 
 	shift_idx = ((reg * 4) + group);
 
-	
 	if (shift_idx >= PMU_CODES_SIZE) {
-		err = -EINVAL;
+		err =  -EINVAL;
 		goto out;
 	}
 
@@ -512,8 +510,7 @@ static int msm_l2_clear_ev_constraint(struct perf_event *event)
 
 	/* Clear code. */
 	l2_pmu_constraints.codes[shift_idx] = -1;
-	
-	out:
+out:
 	raw_spin_unlock_irqrestore(&l2_pmu_constraints.lock, flags);
 	return err;
 }
