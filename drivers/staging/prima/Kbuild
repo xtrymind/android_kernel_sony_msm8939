@@ -666,6 +666,10 @@ endif
 # Fix build for GCC 4.7
 EXTRA_CFLAGS += -Wno-maybe-uninitialized -Wno-unused-function -Wno-unused-variable
 
+ifeq ($(CONFIG_WLAN_FEATURE_HOLD_RX_WAKELOCK),y)
+CDEFINES += -DWLAN_FEATURE_HOLD_RX_WAKELOCK
+endif
+
 KBUILD_CPPFLAGS += $(CDEFINES)
 
 # Module information used by KBuild framework
