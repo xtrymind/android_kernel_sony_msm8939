@@ -735,18 +735,6 @@ int output_buffer_cache_invalidate(struct msm_vidc_inst *inst,
 	}
 	return 0;
 }
-static bool valid_v4l2_buffer(struct v4l2_buffer *b,
-               struct msm_vidc_inst *inst) {
-       enum vidc_ports port =
-               !V4L2_TYPE_IS_MULTIPLANAR(b->type) ? MAX_PORT_NUM :
-               b->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ? CAPTURE_PORT :
-               b->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE ? OUTPUT_PORT :
-                                                               MAX_PORT_NUM;
-
-       return port != MAX_PORT_NUM &&
-               inst->fmts[port]->num_planes == b->length;
-}
-
 
 static bool valid_v4l2_buffer(struct v4l2_buffer *b,
 		struct msm_vidc_inst *inst) {
