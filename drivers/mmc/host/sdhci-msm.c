@@ -41,6 +41,7 @@
 #include <linux/iopoll.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/msm-bus.h>
+#include <linux/fih_hw_info.h>
 
 #include "sdhci-pltfm.h"
 
@@ -1665,6 +1666,21 @@ out:
 	return -EINVAL;
 }
 
+static bool sdhci_msm_check_active_high(void)
+{
+	int phase = fih_get_product_phase();
+	switch (phase) {
+		case PHASE_EVM2:
+		case PHASE_EVM3:
+		case PHASE_PD1:
+		case PHASE_PD2:
+		case PHASE_PD4:
+			return false;
+		default:
+			return true;
+	}
+}
+
 /* Parse platform data */
 static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 						struct sdhci_host *host)
@@ -1684,7 +1700,7 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	}
 
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
-	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
+	if (gpio_is_valid(pdata->status_gpio) & (!(flags & OF_GPIO_ACTIVE_LOW) | sdhci_msm_check_active_high()))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
 
 	of_property_read_u32(np, "qcom,bus-width", &bus_width);
@@ -3576,6 +3592,11 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 		 */
 		sdhci_msm_setup_pins(msm_host->pdata, true);
 
+		/*
+		 * This delay is needed for stabilizing the card detect GPIO
+		 * line after changing the pull configs.
+		 */
+		usleep_range(100000, 105000);
 		ret = mmc_gpio_request_cd(msm_host->mmc,
 				msm_host->pdata->status_gpio);
 		if (ret) {
