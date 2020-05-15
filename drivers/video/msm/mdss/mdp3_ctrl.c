@@ -927,7 +927,6 @@ static int mdp3_ctrl_off(struct msm_fb_data_type *mfd)
 		/* Wait to ensure TG to turn off */
 		msleep(20);
 		mfd->panel_info->cont_splash_enabled = 0;
-
 		/* Disable Auto refresh once continuous splash disabled */
 		mdp3_autorefresh_disable(mfd->panel_info);
 		mdp3_splash_done(mfd->panel_info);
