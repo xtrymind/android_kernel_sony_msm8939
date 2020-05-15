@@ -24,6 +24,13 @@
 
 #define MAX_EVENTS 30
 
+static struct msm_vidc_core *local_core = NULL;
+void dbgcontrol_assert_venus(void)
+{
+	if (local_core)
+		msm_vidc_trigger_ssr(local_core, 1);
+}
+
 static int get_poll_flags(void *instance)
 {
 	struct msm_vidc_inst *inst = instance;
@@ -1288,6 +1295,7 @@ void *msm_vidc_open(int core_id, int session_type)
 	init_waitqueue_head(&inst->kernel_event_queue);
 	inst->state = MSM_VIDC_CORE_UNINIT_DONE;
 	inst->core = core;
+	local_core = core;
 	inst->map_output_buffer = false;
 
 	for (i = SESSION_MSG_INDEX(SESSION_MSG_START);
