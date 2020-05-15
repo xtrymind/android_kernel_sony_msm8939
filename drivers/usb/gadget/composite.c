@@ -775,6 +775,12 @@ static int set_config(struct usb_composite_dev *cdev,
 		 */
 		switch (gadget->speed) {
 		case USB_SPEED_SUPER:
+			if (!f->ss_descriptors) {
+				pr_err("%s(): No SS desc for function:%s\n",
+							__func__, f->name);
+				usb_gadget_set_state(gadget, USB_STATE_ADDRESS);
+				return -EINVAL;
+			}
 			descriptors = f->ss_descriptors;
 			break;
 		case USB_SPEED_HIGH:
@@ -985,7 +991,8 @@ void usb_remove_config(struct usb_composite_dev *cdev,
 	if (cdev->config == config)
 		reset_config(cdev);
 
-	list_del(&config->list);
+	if (config->list.next != LIST_POISON1)
+		list_del(&config->list);
 
 	spin_unlock_irqrestore(&cdev->lock, flags);
 
