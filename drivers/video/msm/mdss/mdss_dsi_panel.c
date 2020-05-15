@@ -37,6 +37,119 @@
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
+#define JDI_NON_PANEL_ID 0x00
+#define JDI_PANEL_ID 0x61
+#define TRULY_PANEL_ID 0x63
+#define TRULY_OTP_PANEL_ID 0x64
+#define INNOLUX_PANEL_ID 0x65
+#define INNOLUX_OTP_PANEL_ID 0x66
+#define INNOLUX_ORISE_PANEL_ID 0x71
+#define INNOLUX_ORISE_OTP_PANEL_ID 0x72
+#define TRULY_ORISE_PANEL_ID 0x73
+#define TRULY_ORISE_OTP_PANEL_ID 0x74
+
+#ifdef CONFIG_FIH_HR_MSLEEP
+#define MDSS_MSLEEP hr_msleep
+#else
+#define MDSS_MSLEEP msleep
+#endif
+static int mdss_dsi_parse_dcs_cmds(struct device_node *np,
+		struct dsi_panel_cmds *pcmds, char *cmd_key, char *link_key);
+struct device_node *gMIPIDSInode;
+
+/*PanelState FLAG use for touch panel, anounce touch driver display status*/
+static bool PanelState = 0x1;
+/*display_on_in_boot FLAG will get LK CMD line(display_status=) and passer it */
+bool display_on_in_boot = false;
+/*DisplayGpioInit FLAG use in gpio have initial all uninitial when call gpio setting*/
+static int DisplayGpioInit = 0;
+/*DisplayGpioInit FLAG use in first gpio intial and register gpio goto which state in cool boot*/
+static int DisplayGpioReady = 0;
+
+static unsigned char gFirstChange = 0;
+static unsigned char gPanelModel = 0;
+static char manufacture_idDA[2] = {0xDA, 0x00};
+static struct dsi_cmd_desc manufacture_id_cmd = {
+	.dchdr = {
+		DTYPE_DCS_READ, 1, 0, 1, 20, sizeof(manufacture_idDA),
+	},
+	.payload = manufacture_idDA,
+};
+
+bool mdss_display_power_state(void)
+{
+	return PanelState;
+}
+EXPORT_SYMBOL(mdss_display_power_state);
+
+bool mdss_display_splash_LK(void)
+{
+	return display_on_in_boot;
+}
+EXPORT_SYMBOL(mdss_display_splash_LK);
+
+unsigned char mdss_manufacture_id_read(void)
+{
+	return gPanelModel;
+}
+
+static void mdss_manufacture_cb(int data)
+{
+	return;
+}
+
+unsigned char mdss_manufacture_id(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	struct dcs_cmd_req cmdreq;
+	char rx_buffer=0xFF;
+
+	memset(&cmdreq, 0, sizeof(cmdreq));
+	cmdreq.cmds = &manufacture_id_cmd;
+	cmdreq.cmds_cnt = 1;
+	cmdreq.flags = CMD_REQ_RX | CMD_REQ_COMMIT;
+	cmdreq.rlen = 1;
+	cmdreq.cb = mdss_manufacture_cb;
+	cmdreq.rbuf = &rx_buffer;
+	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	memcpy(&rx_buffer,cmdreq.rbuf,sizeof(char));
+	pr_info("[DISPLAY]%s: pid 0x%x\n", __func__, rx_buffer);
+	gPanelModel = rx_buffer;
+
+	return gPanelModel;
+}
+
+int mdss_change_dcs_cmd(struct device_node *npIn,
+		struct mdss_dsi_ctrl_pdata *ctrl, const char* name, const int id)
+{
+	struct device_node *all_nodes = NULL;
+	struct device_node *np = npIn;
+	char* panel_name = np->properties->value;
+	char cmd_name[30] = {0};
+	int cmd_name_size = sizeof(cmd_name)/sizeof(cmd_name[0]);
+
+	pr_info("[DISPLAY]%s: %s, id 0x%x\n", __func__, panel_name, id);
+
+	if (strncmp(panel_name, name, strnlen(name, 128)) || !gFirstChange) {
+		all_nodes = of_find_all_nodes(NULL);
+		np = of_find_compatible_node(all_nodes, NULL, name);
+		npIn = np;
+
+		snprintf(cmd_name, cmd_name_size, "qcom,mdss-dsi-on-command-%x", id);
+		mdss_dsi_parse_dcs_cmds(np, &ctrl->on_cmds,
+			cmd_name, "qcom,mdss-dsi-on-command-state");
+
+		mdss_dsi_parse_dcs_cmds(np, &ctrl->off_cmds,
+			"qcom,mdss-dsi-off-command", "qcom,mdss-dsi-off-command-state");
+
+		gFirstChange = 1;
+		panel_name = np->properties->value;
+
+		pr_info("[DISPLAY]%s: change to %s\n", __func__, panel_name);
+	}
+
+	return 0;
+}
+
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
 	if (ctrl->pwm_pmi)
@@ -176,11 +289,12 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
-static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
+static char led_pwm1[2] = {0x51, 0xFF};
 static struct dsi_cmd_desc backlight_cmd = {
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
 	led_pwm1
 };
+static int last_bl_level = 0;
 
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
@@ -193,24 +307,34 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	pr_debug("%s: level=%d\n", __func__, level);
+	if (!level || !last_bl_level)
+		pr_err("[DISPLAY]%s: %d to %d\n",
+			__func__, last_bl_level, level);
 
+	last_bl_level = level;
 	led_pwm1[1] = (unsigned char)level;
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = &backlight_cmd;
 	cmdreq.cmds_cnt = 1;
-	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
+	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL|CMD_REQ_LP_MODE;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	if (!level)
+		PanelState = 0;
+	else
+		if (PanelState == 0)
+			PanelState = 1;
 }
 
 static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
+	struct mdss_panel_info *pinfo = NULL;
 
+	pinfo = &(ctrl_pdata->panel_data.panel_info);
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->disp_en_gpio,
 						"disp_enable");
@@ -225,6 +349,29 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		pr_err("request reset gpio failed, rc=%d\n",
 			rc);
 		goto rst_gpio_err;
+	}
+	if (gpio_is_valid(ctrl_pdata->disp_te_gpio)) {
+		if (pinfo->type == MIPI_CMD_PANEL) {
+			rc = gpio_request(ctrl_pdata->disp_te_gpio, "disp_te");
+			if (rc) {
+				pr_err("request TE gpio failed, rc=%d\n", rc);
+				goto te_gpio_err;
+			}
+		}
+	}
+	if (gpio_is_valid(ctrl_pdata->disp_n5_gpio)) {
+		rc = gpio_request(ctrl_pdata->disp_n5_gpio, "disp_n5");
+		if (rc) {
+			pr_err("request n5 gpio failed, rc=%d\n", rc);
+			goto n5_gpio_err;
+		}
+	}
+	if (gpio_is_valid(ctrl_pdata->disp_p5_gpio)) {
+		rc = gpio_request(ctrl_pdata->disp_p5_gpio, "disp_p5");
+		if (rc) {
+			pr_err("request p5 gpio failed, rc=%d\n", rc);
+			goto p5_gpio_err;
+		}
 	}
 	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->bklt_en_gpio,
@@ -243,25 +390,34 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto mode_gpio_err;
 		}
 	}
+	DisplayGpioInit = 1;
 	return rc;
 
 mode_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 		gpio_free(ctrl_pdata->bklt_en_gpio);
 bklt_en_gpio_err:
-	gpio_free(ctrl_pdata->rst_gpio);
-rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
-		gpio_free(ctrl_pdata->disp_en_gpio);
+		gpio_free(ctrl_pdata->disp_en_gpio);	
+p5_gpio_err:
+	gpio_free(ctrl_pdata->disp_p5_gpio);
+n5_gpio_err:
+	gpio_free(ctrl_pdata->disp_n5_gpio);
+te_gpio_err:
+	if (gpio_is_valid(ctrl_pdata->disp_te_gpio))
+		gpio_free(ctrl_pdata->disp_te_gpio);
+rst_gpio_err:
+	gpio_free(ctrl_pdata->rst_gpio);
 disp_en_gpio_err:
 	return rc;
 }
 
+int is_reset_done = 0;
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
-	int i, rc = 0;
+	int rc = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -291,20 +447,43 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_err("gpio request failed\n");
 			return rc;
 		}
+
+		/*NOTE: Base on this BSP display initial sequence architecture.
+		LK have initial gpio when boot to kernel don't request gpio.
+		When first power off display, we need to request gpio.
+		Or there is power consumption issue*/
+		if ((!DisplayGpioReady)&&(display_on_in_boot)) {
+			DisplayGpioReady=1;
+			is_reset_done = 1;
+			pr_debug("[DISPLAY]%s: GPIOs have been init before\n", __func__);
+
+			gpio_set_value((ctrl_pdata->disp_p5_gpio) , 1);
+			gpio_set_value((ctrl_pdata->disp_n5_gpio) , 1);
+//			gpio_set_value((ctrl_pdata->rst_gpio), 1);
+			gpio_direction_output((ctrl_pdata->rst_gpio), 1);
+
+			return rc;
+		}
+
 		if (!pinfo->cont_splash_enabled) {
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
-
-			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
-				gpio_set_value((ctrl_pdata->rst_gpio),
-					pdata->panel_info.rst_seq[i]);
-				if (pdata->panel_info.rst_seq[++i])
-					usleep(pinfo->rst_seq[i] * 1000);
-			}
-
-			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
-				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
 		}
+
+		if (gpio_is_valid(ctrl_pdata->disp_p5_gpio))
+			gpio_set_value((ctrl_pdata->disp_p5_gpio) , 1);
+
+		usleep(16000);
+
+		if (gpio_is_valid(ctrl_pdata->disp_n5_gpio))
+			gpio_set_value((ctrl_pdata->disp_n5_gpio) , 1);
+		is_reset_done = 0;
+
+		if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
+			gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
+
+		if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
+			gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
 			if (pinfo->mode_gpio_state == MODE_GPIO_HIGH)
@@ -319,19 +498,44 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
-		if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
-			gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
-			gpio_free(ctrl_pdata->bklt_en_gpio);
+		/*NOTE: Base on this BSP display initial sequence architecture.
+		LK have initial gpio when boot to kernel don't request gpio.
+		When first power off display, we need to request gpio.
+		Or there is power consumption issue*/
+		if ((DisplayGpioReady==1)&&(display_on_in_boot)) {
+			rc = mdss_dsi_request_gpios(ctrl_pdata);
+			DisplayGpioReady=2;
+			pr_debug("[DISPLAY]%s: Request gpio for release first denit\n", __func__);
 		}
-		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
-			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
-			gpio_free(ctrl_pdata->disp_en_gpio);
+		if (DisplayGpioInit) {
+			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
+				gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
+				gpio_free(ctrl_pdata->bklt_en_gpio);
+			}
+			if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
+				gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
+				gpio_free(ctrl_pdata->disp_en_gpio);
+			}
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);
+			gpio_free(ctrl_pdata->rst_gpio);
+			is_reset_done = 0;
+			usleep(1000);
+			if (gpio_is_valid(ctrl_pdata->disp_n5_gpio)) {
+				gpio_set_value((ctrl_pdata->disp_n5_gpio) , 0);
+				gpio_free(ctrl_pdata->disp_n5_gpio);
+			}
+			usleep(1000);
+			if (gpio_is_valid(ctrl_pdata->disp_p5_gpio)) {
+				gpio_set_value((ctrl_pdata->disp_p5_gpio), 0);
+				gpio_free(ctrl_pdata->disp_p5_gpio);
+			}
+			usleep(10000);
 		}
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
-		gpio_free(ctrl_pdata->rst_gpio);
+		DisplayGpioInit = 0;
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
 	}
+
 	return rc;
 }
 
@@ -612,15 +816,53 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 				panel_data);
 
 	pr_debug("%s: ctrl=%pK ndx=%d\n", __func__, ctrl, ctrl->ndx);
+	if (ctrl) {
+		mdss_manufacture_id(ctrl);
+		switch (gPanelModel) {
+			case JDI_NON_PANEL_ID:
+			case JDI_PANEL_ID:
+				mdss_change_dcs_cmd(gMIPIDSInode, ctrl,
+					"qcom,mdss-dsi-panel-jdi", gPanelModel);
+				break;
+			case TRULY_PANEL_ID:
+			case TRULY_OTP_PANEL_ID:
+				mdss_change_dcs_cmd(gMIPIDSInode, ctrl,
+					"qcom,mdss-dsi-panel-truly", gPanelModel);
+				break;
+			case INNOLUX_PANEL_ID:
+			case INNOLUX_OTP_PANEL_ID:
+				mdss_change_dcs_cmd(gMIPIDSInode, ctrl,
+					"qcom,mdss-dsi-panel-innolux", gPanelModel);
+				break;
+			case INNOLUX_ORISE_PANEL_ID:
+			case INNOLUX_ORISE_OTP_PANEL_ID:
+				mdss_change_dcs_cmd(gMIPIDSInode, ctrl,
+					"qcom,mdss-dsi-panel-innolux_otm", gPanelModel);
+				break;
+			case TRULY_ORISE_PANEL_ID:
+			case TRULY_ORISE_OTP_PANEL_ID:
+				mdss_change_dcs_cmd(gMIPIDSInode, ctrl,
+					"qcom,mdss-dsi-panel-truly_otm", gPanelModel);
+				break;
+			default:
+				pr_err("[DISPLAY]%s: illegal PID <0x%x>\n", __func__, gPanelModel);
+				break;
+		}
+		if (pinfo->dcs_cmd_by_left) {
+			if (ctrl->ndx != DSI_CTRL_LEFT)
+				goto end;
+		}
 
-	if (pinfo->dcs_cmd_by_left) {
-		if (ctrl->ndx != DSI_CTRL_LEFT)
-			goto end;
+		if (ctrl->on_cmds.cmd_cnt)
+			mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
+		if (gpio_is_valid(ctrl->bklt_en_gpio)){
+			pr_debug("[DISPLAY]%s: backlight on\n", __func__);
+			gpio_set_value((ctrl->bklt_en_gpio), 1);
+		}
+	} else {
+		pr_warn("%s: ctrl=%p gPanelModel=%d\n",
+			__func__, ctrl, gPanelModel);
 	}
-
-	if (ctrl->on_cmds.cmd_cnt)
-		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
 	pr_debug("%s:-\n", __func__);
@@ -1143,6 +1385,8 @@ static int mdss_dsi_parse_panel_features(struct device_node *np,
 	pinfo->cont_splash_enabled = of_property_read_bool(np,
 		"qcom,cont-splash-enabled");
 
+	pr_info("%s: splash status=%x\n", __func__, pinfo->cont_splash_enabled);
+
 	if (pinfo->mipi.mode == DSI_CMD_MODE) {
 		pinfo->partial_update_enabled = of_property_read_bool(np,
 				"qcom,partial-update-enabled");
@@ -1338,7 +1582,6 @@ void mdss_dsi_unregister_bl_settings(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		led_trigger_unregister_simple(bl_led_trigger);
 }
 
-
 /**
  * get_mdss_dsi_even_lane_clam_mask() - Computest DSI lane 0 & 2 clamps mask
  * @dlane_swap: dsi_lane_map_type
@@ -1438,6 +1681,7 @@ u32 get_mdss_dsi_odd_lane_clam_mask(char dlane_swap,
 	else
 		return 0;
 }
+
 static void mdss_dsi_set_lane_clamp_mask(struct mipi_panel_info *mipi)
 {
 	u32 mask = 0;
@@ -1457,7 +1701,6 @@ static void mdss_dsi_set_lane_clamp_mask(struct mipi_panel_info *mipi)
 
 	mipi->phy_lane_clamp_mask = mask;
 }
-
 
 static int mdss_panel_parse_dt(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -1774,7 +2017,10 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		"qcom,mdss-dsi-reset-sequence");
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->on_cmds,
-		"qcom,mdss-dsi-on-command", "qcom,mdss-dsi-on-command-state");
+		"qcom,mdss-dsi-on-command-63", "qcom,mdss-dsi-on-command-state");
+
+	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->post_panel_on_cmds,
+		"qcom,mdss-dsi-post-panel-on-command", NULL);
 
 	mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->post_panel_on_cmds,
 		"qcom,mdss-dsi-post-panel-on-command", NULL);
@@ -1862,6 +2108,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 		strlcpy(&pinfo->panel_name[0], panel_name, MDSS_MAX_PANEL_LEN);
 	}
 	rc = mdss_panel_parse_dt(node, ctrl_pdata);
+	gMIPIDSInode = node;
 	if (rc) {
 		pr_err("%s:%d panel dt parse failed\n", __func__, __LINE__);
 		return rc;
@@ -1870,6 +2117,8 @@ int mdss_dsi_panel_init(struct device_node *node,
 	mdss_dsi_set_lane_clamp_mask(&pinfo->mipi);
 	if (!cmd_cfg_cont_splash)
 		pinfo->cont_splash_enabled = false;
+	pinfo->cont_splash_enabled = display_on_in_boot;
+
 	pr_info("%s: Continuous splash %s\n", __func__,
 		pinfo->cont_splash_enabled ? "enabled" : "disabled");
 
@@ -1886,3 +2135,25 @@ int mdss_dsi_panel_init(struct device_node *node,
 
 	return 0;
 }
+
+static int __init display_on_in_boot_setup(char *str)
+{
+	if (!str)
+		return 0;
+	if (!strncmp(str, "on", 2))
+		display_on_in_boot = true;
+	pr_debug("[DISPLAY]%s: --display_on_in_boot=%d\n", __func__, display_on_in_boot);
+	return 0;
+}
+__setup("display_status=", display_on_in_boot_setup);
+
+static int __init continuous_splash_setup(char *str)
+{
+	if (!str)
+		return 0;
+	if (!strncmp(str, "on", 2))
+		display_on_in_boot = true;
+	pr_debug("[DISPLAY]%s: --display_on_in_boot=%d\n", __func__, display_on_in_boot);
+	return 0;
+}
+__setup("display_status=", continuous_splash_setup);
