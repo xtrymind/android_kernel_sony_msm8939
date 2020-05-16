@@ -653,3 +653,18 @@ endif
 source "lib/Kconfig"
 
 source "arch/arm64/mm/Kconfig"
+
+menu "Sony configuration options"
+
+config MACH_SONY
+	bool "Sony device"
+	depends on ARCH_MSM
+	help
+	  Support for Sony products
+
+config MACH_SONY_MSM8916
+	bool "sony"
+	depends on ARCH_MSM8916
+	select MACH_SONY
+
+endmenu
