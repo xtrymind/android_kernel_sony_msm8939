@@ -338,8 +338,6 @@ static void sensor_irq_do_work(struct work_struct *work)
     uint16_t intFlag;
     _cm36686_I2C_Read_Word(lpi->slave_addr, INT_FLAG, &intFlag);
 
-    printk( "D[PS] Int, Flag(0x%x)\n", intFlag );
-
     isr_report(lpi, intFlag);
 
     enable_irq(lpi->irq);
@@ -1724,8 +1722,6 @@ static int lsensor_report(struct cm36686_info *lpi)
 
         Lux	= Lux <= 7 ? 0 : Lux;
         lpi->current_lux	= Lux;
-
-        printk( "[LS][CM36686] [L][A:I:S]=[%d][0x%x:%d:%d]\n", Lux, adc_value, IR_Ink, Step );
 
         input_report_abs( lpi->ls_input_dev, ABS_MISC, Lux );
         input_sync( lpi->ls_input_dev );
