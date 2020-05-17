@@ -111,13 +111,8 @@ static void cyttsp4_get_mt_touches(struct cyttsp4_mt_data *md, int num_cur_rec)
 
 	bitmap_zero(ids, si->si_ofs.tch_abs[CY_TCH_T].max);
 
-	/* PERI-FG-TOUCH_WORKAROUND-00+[ */
 	if (!mdss_display_power_state())
-	{
-		printk( "ETUCH : Skip touch events\n" );
 		return;
-	}
-	/* PERI-FG-TOUCH_WORKAROUND-00+] */
 
 	for (i = 0; i < num_cur_rec; i++) {
 		cyttsp4_get_touch_record(md->ttsp, i, tch.abs);
@@ -248,9 +243,6 @@ cyttsp4_get_mt_touches_pr_tch:
 
 				if( action == CY_EV_LIFTOFF )
 					finger_state->down_state	= false;
-
-				if( down != finger_state->down_state )
-					printk( "ETUCH : <%d>(%s)[%d:%d:%d]|[%d,%d]\n", finger, finger_state->down_state ? "down" : "up", tch.abs[CY_TCH_X], tch.abs[CY_TCH_Y], tch.abs[CY_TCH_P], tch.abs[CY_TCH_OR], finger_state->pointer_count );
 			}
 		}
 
@@ -509,16 +501,12 @@ static int fb_notifier_callback(struct notifier_block *self,
 		if ((*blank == FB_BLANK_UNBLANK || *blank == FB_BLANK_VSYNC_SUSPEND) && md->is_suspended == true)	/* PERI-FG-TOUCH_SUSPEND-01* */
 		{
 			cyttsp4_mt_resume(&(md->ttsp->dev));
-			printk( "ETUCH : Resume\n" );
 			RestoreGloveState();
 		}
 		else if (*blank == FB_BLANK_POWERDOWN && md->is_suspended == false)	/* PERI-FG-TOUCH_SUSPEND-00* */
 		{
 			cyttsp4_mt_suspend(&(md->ttsp->dev));
-			printk( "ETUCH : Suspend\n" );
 		}
-		else
-			printk( "ETUCH : Unknown *blank(%d), md->is_suspended(%d)\n", *blank, md->is_suspended );
 	}
 
 	return 0;
