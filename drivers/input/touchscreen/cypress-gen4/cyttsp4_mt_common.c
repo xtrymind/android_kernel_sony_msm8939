@@ -232,7 +232,6 @@ cyttsp4_get_mt_touches_pr_tch:
 			if( t < sizeof( pointer_state ) / sizeof( *pointer_state ) )
 			{
 				struct pointer_information	*finger_state = pointer_state + finger;
-				bool	down = finger_state->down_state;
 				int	action = tch.abs[CY_TCH_E];
 
 				if( action == CY_EV_TOUCHDOWN )
